@@ -3,6 +3,7 @@ import matplotlib.animation as animation
 import numpy as np
 from matplotlib.patches import Circle, Rectangle
 from matplotlib.collections import PatchCollection
+from matplotlib.widgets import Button  
 from datetime import datetime, timedelta
 import random
 from collections import defaultdict
@@ -418,107 +419,226 @@ for p in random.sample(people, initial_infected):
     p.state = 1
 
 # Visualization setup
-fig = plt.figure(figsize=(20, 10))
+fig = plt.figure(figsize=(18, 12))
 
 # Create main grid for the entire figure
 if NUM_PEOPLE <= 500:
-    gs_main = fig.add_gridspec(1, 3, width_ratios=[6, 1, 3])  # Panel B = 1 part
+    # Original layout with all three panels when population is small
+    gs_main = fig.add_gridspec(1, 3, width_ratios=[5, 1, 3], wspace=0.01)
 else:
-    gs_main = fig.add_gridspec(1, 3, width_ratios=[6, 1.5, 2.5])  # Increased middle and right panel widths
+    # Modified layout for large populations - give more space to status and disease graph
+    gs_main = fig.add_gridspec(1, 3, width_ratios=[7, 3, 0], wspace=0.15)
 
-# Panel A: Simulation
-ax1 = fig.add_subplot(gs_main[0, 0])
-ax1.set_xlim(0, WIDTH + 40)
+gs_left = gridspec.GridSpecFromSubplotSpec(
+    2, 1,
+    subplot_spec=gs_main[0, 0],
+    height_ratios=[15, 1],  # Simulation gets 15x height, legend just 1x
+    hspace=0.05
+)
+
+# Simulation Panel
+ax1 = fig.add_subplot(gs_left[0])
+ax1.set_xlim(0, WIDTH)
 ax1.set_ylim(0, HEIGHT)
 ax1.axis('off')
 
-# Panel B: Status / Control / Stats (middle)
-ax_status = fig.add_subplot(gs_main[0, 1])
-ax_status.axis('off')
+#  Legend Panel directly below simulation
+ax_legend = fig.add_subplot(gs_left[1])
+ax_legend.clear()
+ax_legend.set_xlim(0, 6.5)
+ax_legend.set_ylim(0, 0.5)
+ax_legend.set_aspect('equal') 
+ax_legend.axis('off')
 
-# Only create right panels if NUM_PEOPLE <= 500
+# Define legend items
+legend_items = [
+    ("Healthy", '#1f77b4', False),
+    ("Infected", (1.0, 0.1, 0.1), False),
+    ("Quarantined", '#800080', False),
+    ("Recovered", '#2ca02c', False),
+    
+]
+
+num_cols = 4
+num_rows = (len(legend_items) + num_cols - 1) // num_cols
+x_spacing = 5.95 / (num_cols + 1)
+y_spacing = 1.0 / (num_rows + 1)
+radius = 0.05
+padding = 0.1
+
+for idx, (label, color, is_masked) in enumerate(legend_items):
+    row = idx // num_cols
+    col = idx % num_cols
+
+    x = (col + 1) * x_spacing + padding
+    y = 1 - (row + 1) * y_spacing - padding
+
+    circle = Circle((x, y), radius, color=color, zorder=1)
+    ax_legend.add_patch(circle)
+
+    if is_masked:
+        mask_circle = Circle((x, y), radius * 0.6, color='#000000', zorder=2)
+        ax_legend.add_patch(mask_circle)
+
+    ax_legend.text(x + radius + 0.01, y, label,
+                   va='center', ha='left', fontsize=9)
+
 if NUM_PEOPLE <= 500:
-    # Panel C: Right side container
+
+       # Panel C: Right side container (network + disease graph)
     gs_right = gridspec.GridSpecFromSubplotSpec(
-        2, 1,
-        subplot_spec=gs_main[0, 2],
-        height_ratios=[1.2, 0.8],
-        hspace=0.3
+    2, 1,
+    subplot_spec=gs_main[0, 2],
+    height_ratios=[1.4, 1],
+    hspace=0.05
     )
 
+    gs_bottom_right = gridspec.GridSpecFromSubplotSpec(
+    1, 2,
+    subplot_spec=gs_right[1],
+    width_ratios=[0.05, 2.8],
+    wspace= 1.0
+    )
+
+    # Panel B: Status/Control/Stats (middle)
+    ax_status = fig.add_subplot(gs_bottom_right[0])
+    ax_status.axis('off')
+
+            # Fixed-size status text area
+    status_text = ax_status.text(
+            0.02, 0.98, "",
+            transform=ax_status.transAxes,
+            va='top',
+            ha='left',
+            fontsize=8,
+            bbox=dict(facecolor='white', alpha=0.7, boxstyle='round,pad=0.5')
+    )
+    
+ 
+    
     # Network Graph (top right)
     ax_network = fig.add_subplot(gs_right[0])
     ax_network.axis('off')
 
+        # Create NetworkX graph
+    G = nx.Graph()
+    for i in range(NUM_PEOPLE):
+        G.add_node(i)
+    pos = nx.spring_layout(G, k=0.5, iterations=50)
+
+    def show_full_network(event):
+     if G is None or pos is None:
+        print("Network graph not available for large population.")
+        return
+
+     fig_full, ax_full = plt.subplots(figsize=(10, 10))
+     ax_full.set_title("Full Social Network", fontsize=16)
+
+     ax_full.clear()
+     node_colors = []
+     for p in people:
+        if p.state == 0:
+            node_colors.append('#1f77b4' if not p.vaccinated else '#17becf')
+        elif p.state == 1:
+            severity = min(0.8 + p.infection_severity * 0.2, 1.0)
+            node_colors.append((severity, 0.1, 0.1))  # Red shade
+        else:
+            node_colors.append('#2ca02c')  # Green for recovered
+
+    # Draw the updated graph with latest colors and edges
+     nx.draw_networkx(
+        G, pos=pos, ax=ax_full,
+        node_color=node_colors,
+        with_labels=False,
+        node_size=75,
+        edge_color='gray',
+        alpha=0.7,
+        width=0.6
+     )
+     ax_full.set_xlim([min(x for x, y in pos.values()) - 0.1, max(x for x, y in pos.values()) + 0.1])
+     ax_full.set_ylim([min(y for x, y in pos.values()) - 0.1, max(y for x, y in pos.values()) + 0.1])
+
+# Ensure the aspect ratio is equal to prevent stretching
+    
+     plt.draw()
+     plt.show()
+    
+    #the button 
+    button_ax = fig.add_axes([0.75, 0.92, 0.12, 0.045])  # Adjust position as needed
+    full_view_button = Button(button_ax, 'Full Network', color='lightgray', hovercolor='skyblue')
+    full_view_button.on_clicked(show_full_network)
+
+
+
     # Disease Spread Graph (bottom right)
+    ax3 = fig.add_subplot(gs_bottom_right[1])
+    ax3.set_xlabel("Time", fontsize=12)
+    ax3.set_ylabel("Number of People", fontsize=12)
+    ax3.grid(True)
+    ax3.tick_params(axis='both', which='major', labelsize=10)
+    
+    
+
+else:
+    # For larger populations - combine status and disease graph in one panel
+    gs_right = gridspec.GridSpecFromSubplotSpec(
+        2, 1,
+        subplot_spec=gs_main[0, 1],
+        height_ratios=[1, 1],
+        hspace=0.5
+    )
+    
+    # Status panel (top)
+    ax_status = fig.add_subplot(gs_right[0])
+    ax_status.axis('off')
+
+    status_text = ax_status.text(
+            0.02, 0.98, "",
+            transform=ax_status.transAxes,
+            va='top',
+            ha='left',
+            fontsize=8,
+            bbox=dict(facecolor='white', alpha=0.7, boxstyle='round,pad=0.5')
+    )
+    ax_status.set_position([0.75, 0.05, 0.2, 0.25])
+    # Disease Spread Graph (bottom)
     ax3 = fig.add_subplot(gs_right[1])
     ax3.set_xlabel("Time", fontsize=12)
     ax3.set_ylabel("Number of People", fontsize=12)
     ax3.grid(True)
     ax3.tick_params(axis='both', which='major', labelsize=10)
 
-    # Initialize disease spread lines
-    susceptible_line, = ax3.plot([], [], 'b-', label='Susceptible')
-    infected_line, = ax3.plot([], [], 'r-', label='Infected')
-    quarantined_line, = ax3.plot([], [], 'm-', label='Quarantined') 
-    recovered_line, = ax3.plot([], [], 'g-', label='Recovered')
-    ax3.legend(loc='upper left', fontsize=10)
-
-    # Create NetworkX graph
-    G = nx.Graph()
-    for i in range(NUM_PEOPLE):
-        G.add_node(i)
-
-    # Initialize graph layout
-    pos = nx.spring_layout(G, k=1, iterations=50)
-else:
-    # For larger populations, only create disease spread graph in the right panel
-    ax3 = fig.add_subplot(gs_main[0, 2])
-    ax3.set_xlabel("Time", fontsize=12)
-    ax3.set_ylabel("Number of People", fontsize=12, labelpad=15)
-    ax3.grid(True)
-    ax3.tick_params(axis='both', which='major', labelsize=10)
-    ax3.yaxis.set_label_coords(-0.1, 0.5)
-
-    # Initialize disease spread lines
-    susceptible_line, = ax3.plot([], [], 'b-', label='Susceptible')
-    infected_line, = ax3.plot([], [], 'r-', label='Infected')
-    quarantined_line, = ax3.plot([], [], 'm-', label='Quarantined') 
-    recovered_line, = ax3.plot([], [], 'g-', label='Recovered')
-    ax3.legend(loc='upper left', fontsize=10, bbox_to_anchor=(0.1, 1.0))
     
-    # Set G and pos to None for larger populations
+    # No network graph for large populations
     G = None
     pos = None
 
+# Initialize disease spread lines (common for both cases)
+susceptible_line, = ax3.plot([], [], 'b-', label='Susceptible')
+infected_line, = ax3.plot([], [], 'r-', label='Infected')
+quarantined_line, = ax3.plot([], [], 'm-', label='Quarantined') 
+recovered_line, = ax3.plot([], [], 'g-', label='Recovered')
+ax3.legend(loc='upper right', fontsize=10)
+
 # Adjust subplot spacing
-if NUM_PEOPLE <= 500:
-    plt.subplots_adjust(
-        left=0.05,      # Left margin
-        right=0.95,     # Right margin
-        top=0.95,       # Top margin
-        bottom=0.05,    # Bottom margin
-        wspace=0.15     # Width space between subplots
-    )
-else:
-    plt.subplots_adjust(
-        left=0.05,      # Left margin
-        right=0.95,     # Right margin
-        top=0.95,       # Top margin
-        bottom=0.05,    # Bottom margin
-        wspace=0.25     # Increased width space for larger populations
-    )
+plt.subplots_adjust(
+    left=0.05,
+    right=0.95,
+    top=0.95,
+    bottom=0.05,
+    wspace=0.1 if NUM_PEOPLE <= 500 else 0.2
+)
 
 # Update the status text position and size
-status_text = ax_status.text(0.5, 0.95, "", transform=ax_status.transAxes, 
-                           va='top', ha='center', fontsize=9, 
-                           bbox=dict(facecolor='white', alpha=0.7))
+status_text = ax_status.text(0.5, 0.95, "", transform=ax_status.transAxes,
+                          va='top', ha='center', fontsize=9,
+                          bbox=dict(facecolor='white', alpha=0.7))
 
 # Update time and stats text positions
 time_text = ax1.text(0.5, 0.98, "", transform=ax1.transAxes, ha='center', va='top', fontsize=14,
-                    bbox=dict(facecolor='white', alpha=0.7))
+                   bbox=dict(facecolor='white', alpha=0.7))
 stats_text = ax1.text(0.02, 0.98, "", transform=ax1.transAxes, va='top', fontsize=12,
-                     bbox=dict(facecolor='white', alpha=0.7))
+                    bbox=dict(facecolor='white', alpha=0.7))
 
 # Optimized visualization
 circles = [Circle((p.x, p.y), p.size/50) for p in people]
@@ -598,7 +718,7 @@ def update(frame):
                                             p2.in_quarantine = True
                                             p2.current_target = p2.home
                                             p2.target_reached = False
-                                            event_logger.log_event(f"High severity case quarantined at {p2.current_area if p2.current_area else 'Unknown'} area")
+                                            event_logger.log_event(f"Quarantined : {p2.current_area if p2.current_area else 'Unknown'} area")
                                         event_logger.log_event(
                                             f"INFECTION: {p2.current_area if p2.current_area else 'Unknown'} area")
 
@@ -640,8 +760,11 @@ def update(frame):
         if p.state == 0:
             colors.append('#1f77b4' if not p.vaccinated else '#17becf')
         elif p.state == 1:
-            severity = min(0.8 + p.infection_severity * 0.2, 1.0)
-            colors.append((severity, 0.1, 0.1))
+             if p.in_quarantine:  # Quarantined infected
+              colors.append('#800080')  # Purple for quarantined infected
+             else:
+              severity = min(0.8 + p.infection_severity * 0.2, 1.0)
+              colors.append((severity, 0.1, 0.1))  # Red shades for infected
         else:
             colors.append('#2ca02c')
         if p.masked:
