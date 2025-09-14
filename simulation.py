@@ -23,9 +23,9 @@ def get_simulation_parameters():
         'INFECTION_PROB': 0.15,
         'MASK_EFFECTIVENESS': 0.7,
         'VACCINE_EFFECTIVENESS': 0.85,
-        'RECOVERY_DAYS': 7,
+        'RECOVERY_DAYS': 5,
         'SEVERITY_THRESHOLD': 0.6,
-        'TIME_PER_FRAME_MINUTES': 2,
+        'TIME_PER_FRAME_MINUTES': 3,
         'MASK_RATE': 0.7,
         'VACCINE_RATE': 0.6,
         'ISOLATION_RATE': 0.8,
@@ -139,9 +139,12 @@ MASK_RATE = params['MASK_RATE']
 VACCINE_RATE = params['VACCINE_RATE']
 ISOLATION_RATE = params['ISOLATION_RATE']
 LOCKDOWN_THRESHOLD = 0.5  # Set to 50%
+LOCKDOWN_DURATION_DAYS = 5
+
 
 current_time = datetime(2023, 1, 1, 6, 0)
 lockdown = False
+lockdown_start_time = None
 
 HOME_AREA = (0, 50, 50, 100)
 WORK_AREA = (50, 50, 100, 100)
@@ -177,7 +180,7 @@ class EventLogger:
         self.quarantined_history = []
         self.recovery_history = []
         self.time_history = []
-
+        self.lockdown_times = []
     def log_event(self, message):
         timestamp = datetime.now().strftime("%H:%M:%S")
         self.events.append(f"[{timestamp}] {message}")
@@ -665,7 +668,7 @@ for area, label, color in zones:
             bbox=dict(facecolor='white', alpha=0.7))
 
 def update(frame):
-    global current_time, lockdown, pos
+    global current_time, lockdown, pos ,lockdown_start_time
     current_time += TIME_PER_FRAME
     time_str = current_time.strftime("%A, %b %d\n%I:%M %p")
     day_night = "Day" if 6 <= current_time.hour < 18 else "Night"
@@ -725,6 +728,7 @@ def update(frame):
     # Lockdown trigger at 50% infection rate (counting all infected)
     if infected_count >= NUM_PEOPLE * LOCKDOWN_THRESHOLD and not lockdown:
         lockdown = True
+        lockdown_start_time = current_time
         event_logger.log_event(f"LOCKDOWN! {infected_count}/{NUM_PEOPLE} ({infected_count/NUM_PEOPLE:.0%}) infected")
         
         # Place 60% of infected in quarantine
@@ -745,7 +749,16 @@ def update(frame):
                 p.max_area_time *= 1.5
                 event_logger.log_event("Movement restrictions applied during lockdown")
 
-    # Update event logger counts
+    if lockdown and lockdown_start_time and (current_time - lockdown_start_time) >= timedelta(days=7): 
+        lockdown = False
+        event_logger.log_event(f"LOCKDOWN ENDED after 7 days")
+        
+        # Restore normal movement parameters
+        for p in people:
+            if not p.in_quarantine:
+                p.speed = min(p.speed * 2, 1.2)  # Safely restore speed without division
+                p.max_area_time = max(p.max_area_time / 1.5, 100) 
+
     event_logger.update_counts(people)
 
     # Update status text
@@ -830,6 +843,8 @@ def update(frame):
                     'Lockdown', rotation=90, va='top')
 
     return circle_collection, mask_collection, time_text, status_text
+
+
 
 ani = animation.FuncAnimation(fig, update, frames=1000, interval=50, blit=False)
 plt.tight_layout()
